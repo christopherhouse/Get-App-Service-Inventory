@@ -33,12 +33,21 @@ function Invoke-ArgQuery {
     $merged = $null
 
     while ($true) {
-        $p = @{ Query = $Query; First = $batch; Skip = $skip }
+        $p = @{ Query = $Query; First = $batch }
+        if ($skip -gt 0) { $p.Skip = $skip }
         if ($Subscriptions) { $p.Subscription = $Subscriptions }
 
         $page = Search-AzGraph @p
-        if (-not $merged) { $merged = $page.Data.Clone() }
-        $merged.Merge($page.Data)
+        if ($null -eq $page -or $null -eq $page.Data) {
+            Write-Warning "No data returned for query: $Name"
+            break
+        }
+        
+        if (-not $merged) { 
+            $merged = $page.Data.Clone() 
+        } else {
+            $merged.Merge($page.Data)
+        }
 
         $fetched = $page.Data.Rows.Count
         if ($fetched -lt $batch) { break }
@@ -124,7 +133,7 @@ $tables = [ordered]@{
 $first = $true
 foreach ($sheet in $tables.Keys) {
     $dt = $tables[$sheet]
-    if ($dt.Rows.Count) {
+    if ($dt -and $dt.Rows.Count) {
         Export-Excel $WorkspacePath `
             -WorksheetName $sheet `
             -TableName     $sheet `

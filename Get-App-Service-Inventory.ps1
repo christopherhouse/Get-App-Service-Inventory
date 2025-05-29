@@ -20,11 +20,11 @@ Import-Module Az.ResourceGraph      -EA Stop
 Import-Module Az.OperationalInsights -EA Stop
 Import-Module ImportExcel           -EA Stop
 
-#── Sign-in ──────────────────────────────────────────────────────────────
-$connect = @{ ErrorAction = 'Stop' }
-if ($AccountId) { $connect.AccountId = $AccountId }
-if ($TenantId ) { $connect.TenantId  = $TenantId  }
-if (-not (Get-AzContext)) { Connect-AzAccount @connect | Out-Null }
+$login = @{ ErrorAction = 'Stop' }
+if ($AccountId) { $login.AccountId = $AccountId }
+if ($TenantId ) { $login.TenantId  = $TenantId  }
+
+Connect-AzAccount @login | Out-Null
 
 #── Helper: run ARG with paging, return one DataTable ────────────────────
 function Invoke-ArgQuery {

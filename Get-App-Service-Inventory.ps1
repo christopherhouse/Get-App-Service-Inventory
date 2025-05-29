@@ -43,13 +43,29 @@ function Invoke-ArgQuery {
             break
         }
         
-        if (-not $merged) { 
-            $merged = $page.Data.Clone() 
+        if (-not $merged) {
+            # Handle different return types from Search-AzGraph
+            if ($page.Data -is [System.Data.DataTable]) {
+                # For DataTable, copy the first page completely
+                $merged = $page.Data.Copy()
+            } else {
+                # For List or other collection types, convert to array
+                $merged = @($page.Data)
+            }
         } else {
-            $merged.Merge($page.Data)
+            if ($merged -is [System.Data.DataTable] -and $page.Data -is [System.Data.DataTable]) {
+                $merged.Merge($page.Data)
+            } else {
+                # For array/list types, combine using array addition
+                $merged = @($merged) + @($page.Data)
+            }
         }
 
-        $fetched = $page.Data.Rows.Count
+        if ($merged -is [System.Data.DataTable]) {
+            $fetched = $page.Data.Rows.Count
+        } else {
+            $fetched = @($page.Data).Count
+        }
         if ($fetched -lt $batch) { break }
         $skip += $batch
     }
@@ -133,15 +149,20 @@ $tables = [ordered]@{
 $first = $true
 foreach ($sheet in $tables.Keys) {
     $dt = $tables[$sheet]
-    if ($dt -and $dt.Rows.Count) {
-        Export-Excel $WorkspacePath `
-            -WorksheetName $sheet `
-            -TableName     $sheet `
-            -AutoSize      `
-            -FreezeTopRow  `
-            -Append:(-not $first)
-        $first = $false
-        Write-Host ("      ✓ {0,-11} {1,6} rows" -f $sheet,$dt.Rows.Count)
+    if ($dt) {
+        $rowCount = if ($dt -is [System.Data.DataTable]) { $dt.Rows.Count } else { @($dt).Count }
+        if ($rowCount -gt 0) {
+            Export-Excel $WorkspacePath `
+                -WorksheetName $sheet `
+                -TableName     $sheet `
+                -AutoSize      `
+                -FreezeTopRow  `
+                -Append:(-not $first)
+            $first = $false
+            Write-Host ("      ✓ {0,-11} {1,6} rows" -f $sheet,$rowCount)
+        } else {
+            Write-Host ("      • Skipped {0} (empty)" -f $sheet)
+        }
     } else {
         Write-Host ("      • Skipped {0} (empty)" -f $sheet)
     }

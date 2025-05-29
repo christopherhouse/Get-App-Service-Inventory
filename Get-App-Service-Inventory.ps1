@@ -88,13 +88,7 @@ function Invoke-MetricsQuery {
     }
 
     try {
-        # Check if we have a valid context before attempting the query
-        $context = Get-AzContext
-        if (-not $context) {
-            Write-Warning "No Azure context found. Please run Connect-AzAccount first."
-            return $null
-        }
-
+        # First, try the query with current authentication
         $result = Invoke-AzOperationalInsightsQuery -WorkspaceId $LogAnalyticsWorkspaceId -Query $Query
         if ($result -and $result.Results) {
             Write-Host "      ✓ Found $($result.Results.Count) records"
@@ -105,11 +99,40 @@ function Invoke-MetricsQuery {
         }
     }
     catch {
-        Write-Warning "Error executing metrics query '$Name': $($_.Exception.Message)"
-        if ($_.Exception.Message -like "*Authentication failed*" -or $_.Exception.Message -like "*credentials have not been set up*") {
-            Write-Host "      💡 Try running: Connect-AzAccount -AuthScope 'https://api.loganalytics.io/'" -ForegroundColor Yellow
+        # If we get an authentication error, try to re-authenticate with Log Analytics scope
+        if ($_.Exception.Message -like "*Authentication failed*" -or 
+            $_.Exception.Message -like "*credentials have not been set up*" -or
+            $_.Exception.Message -like "*OperationalInsightsEndpointResourceId*") {
+            
+            Write-Host "      🔑 Re-authenticating for Log Analytics access..."
+            try {
+                $laConnect = @{ 
+                    ErrorAction = 'Stop'
+                    AuthScope = 'OperationalInsightsEndpointResourceId'
+                }
+                if ($AccountId) { $laConnect.AccountId = $AccountId }
+                if ($TenantId) { $laConnect.TenantId = $TenantId }
+                
+                Connect-AzAccount @laConnect | Out-Null
+                
+                # Retry the query
+                $result = Invoke-AzOperationalInsightsQuery -WorkspaceId $LogAnalyticsWorkspaceId -Query $Query
+                if ($result -and $result.Results) {
+                    Write-Host "      ✓ Found $($result.Results.Count) records"
+                    return $result.Results
+                } else {
+                    Write-Host "      ℹ️  No data returned"
+                    return $null
+                }
+            }
+            catch {
+                Write-Warning "Error after re-authentication: $($_.Exception.Message)"
+                return $null
+            }
+        } else {
+            Write-Warning "Error executing metrics query '$Name': $($_.Exception.Message)"
+            return $null
         }
-        return $null
     }
 }
 

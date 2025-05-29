@@ -1,7 +1,8 @@
 <#
   Export-AppServiceSizing.ps1  (v2025-05-29-p2)
   ▸ Collects App/Plan inventory, autoscale, stacks, networking,
-    domain bindings — writes one XLSX with six sheets.
+    domain bindings — writes one XLSX with multiple sheets.
+  ▸ Collects metrics data from Log Analytics (response time, CPU, memory).
   ▸ Handles >1 000 ARG rows via paging (Skip + First=1000).
 #>
 
@@ -10,12 +11,14 @@ param(
     [string]   $WorkspacePath = ".\AppServiceSizing_{0:yyyyMMdd}.xlsx" -f (Get-Date),
     [string[]] $Subscriptions,
     [string]   $AccountId,
-    [string]   $TenantId
+    [string]   $TenantId,
+    [string]   $LogAnalyticsWorkspaceId
 )
 
-Import-Module Az.Accounts      -EA Stop
-Import-Module Az.ResourceGraph -EA Stop
-Import-Module ImportExcel      -EA Stop
+Import-Module Az.Accounts           -EA Stop
+Import-Module Az.ResourceGraph      -EA Stop
+Import-Module Az.OperationalInsights -EA Stop
+Import-Module ImportExcel           -EA Stop
 
 #── Sign-in ──────────────────────────────────────────────────────────────
 $connect = @{ ErrorAction = 'Stop' }
@@ -71,6 +74,33 @@ function Invoke-ArgQuery {
     }
 
     return $merged
+}
+
+#── Helper: run Log Analytics query, return DataTable ────────────────────
+function Invoke-MetricsQuery {
+    param([string]$Name,[string]$Query)
+
+    Write-Host "   📊 $Name ..."
+    
+    if (-not $LogAnalyticsWorkspaceId) {
+        Write-Host "      ⚠️  Skipped (no workspace ID provided)"
+        return $null
+    }
+
+    try {
+        $result = Invoke-AzOperationalInsightsQuery -WorkspaceId $LogAnalyticsWorkspaceId -Query $Query
+        if ($result -and $result.Results) {
+            Write-Host "      ✓ Found $($result.Results.Count) records"
+            return $result.Results
+        } else {
+            Write-Host "      ℹ️  No data returned"
+            return $null
+        }
+    }
+    catch {
+        Write-Warning "Error executing metrics query '$Name': $($_.Exception.Message)"
+        return $null
+    }
 }
 
 #── 1  Apps ──────────────────────────────────────────────────────────────
@@ -133,6 +163,91 @@ Resources
          SslState = properties.sslState, Thumbprint = properties.thumbprint
 '@
 
+#── Metrics queries ──────────────────────────────────────────────────────
+Write-Host "`n🔍  Collecting metrics from Log Analytics..."
+
+# Define metrics queries for easy maintenance
+$metricsQueries = [ordered]@{
+    'ResponseTime' = @{
+        Name = 'Average Response Time by App per Day'
+        Query = @'
+AzureMetrics
+| where TimeGenerated > ago(30d)
+| where ResourceProvider == "MICROSOFT.WEB" and _ResourceId has "/sites/"
+| where MetricName == "HttpResponseTime"
+| extend parts = split(_ResourceId,'/')
+| extend SubId = tostring(parts[2]),
+         RG    = tostring(parts[4]),
+         AppName = tostring(parts[8])
+| summarize AvgRespSec = avg(Average) by bin(TimeGenerated,1d), SubId, RG, AppName
+| extend AvgRespMs = AvgRespSec * 1000
+| project TimeGenerated, SubId, RG, AppName, AvgRespMs
+'@
+    }
+    'CpuSeconds' = @{
+        Name = 'CPU Seconds per App per Day'
+        Query = @'
+AzureMetrics
+| where TimeGenerated > ago(30d)
+| where ResourceProvider == "MICROSOFT.WEB"
+| where _ResourceId has "/sites/"
+| where MetricName == "CpuTime"
+| extend parts = split(_ResourceId,'/')
+| extend SubId        = tostring(parts[2]),
+         RG           = tostring(parts[4]),
+         AppName      = tostring(parts[8])
+| summarize CpuSeconds = sum(Total) by bin(TimeGenerated,1d), SubId, RG, AppName
+| order by AppName, TimeGenerated
+'@
+    }
+    'MemoryWorkingSet' = @{
+        Name = 'Average Working Set per App per Day'
+        Query = @'
+AzureMetrics
+| where TimeGenerated > ago(30d)
+| where ResourceProvider == "MICROSOFT.WEB" and _ResourceId has "/sites/"
+| where MetricName == "AverageMemoryWorkingSet"
+| extend parts = split(_ResourceId,'/')
+| extend SubId = tostring(parts[2]),
+         RG    = tostring(parts[4]),
+         AppName = tostring(parts[8])
+| summarize AvgMemBytes = avg(Average) by bin(TimeGenerated,1d), SubId, RG, AppName
+| extend AvgMemMiB = AvgMemBytes / 1024 / 1024
+| project TimeGenerated, SubId, RG, AppName, AvgMemMiB
+'@
+    }
+    'CpuMemoryPct' = @{
+        Name = 'CPU and Memory % by App per Day'
+        Query = @'
+let base =
+    AzureMetrics
+    | where TimeGenerated > ago(30d)
+    | where ResourceProvider == "MICROSOFT.WEB"
+    | where _ResourceId has "/serverfarms/"
+    | where MetricName in ("CpuPercentage","MemoryPercentage");
+base
+| extend parts = split(_ResourceId,'/')
+| extend SubId     = tostring(parts[2]),
+         RG        = tostring(parts[4]),
+         PlanName  = tostring(parts[8])
+| summarize AvgPct = avg(Average)
+          by bin(TimeGenerated,1d), SubId, RG, PlanName, MetricName
+| evaluate pivot(MetricName, any(AvgPct))
+| project TimeGenerated, SubId, RG, PlanName,
+          CpuPct = todouble(CpuPercentage),
+          MemPct = todouble(MemoryPercentage)
+'@
+    }
+}
+
+# Execute metrics queries
+$metricsResults = [ordered]@{}
+foreach ($key in $metricsQueries.Keys) {
+    $queryInfo = $metricsQueries[$key]
+    $result = Invoke-MetricsQuery $queryInfo.Name $queryInfo.Query
+    $metricsResults[$key] = $result
+}
+
 #── Excel output ─────────────────────────────────────────────────────────
 Write-Host "💾  Writing $WorkspacePath ..."
 Remove-Item $WorkspacePath -EA SilentlyContinue
@@ -144,6 +259,13 @@ $tables = [ordered]@{
     Stacks     = $stack
     Networking = $net
     Domains    = $domains
+}
+
+# Add metrics results to tables
+foreach ($key in $metricsResults.Keys) {
+    if ($metricsResults[$key]) {
+        $tables[$key] = $metricsResults[$key]
+    }
 }
 
 $first = $true

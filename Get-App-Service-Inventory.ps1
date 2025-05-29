@@ -152,7 +152,7 @@ foreach ($sheet in $tables.Keys) {
     if ($dt) {
         $rowCount = if ($dt -is [System.Data.DataTable]) { $dt.Rows.Count } else { @($dt).Count }
         if ($rowCount -gt 0) {
-            Export-Excel $WorkspacePath `
+            $dt | Export-Excel $WorkspacePath `
                 -WorksheetName $sheet `
                 -TableName     $sheet `
                 -AutoSize      `

@@ -24,9 +24,6 @@ Import-Module ImportExcel           -EA Stop
 $connect = @{ ErrorAction = 'Stop' }
 if ($AccountId) { $connect.AccountId = $AccountId }
 if ($TenantId ) { $connect.TenantId  = $TenantId  }
-if ($LogAnalyticsWorkspaceId) { 
-    $connect.AuthScope = 'OperationalInsightsEndpointResourceId'
-}
 if (-not (Get-AzContext)) { Connect-AzAccount @connect | Out-Null }
 
 #── Helper: run ARG with paging, return one DataTable ────────────────────
@@ -91,6 +88,13 @@ function Invoke-MetricsQuery {
     }
 
     try {
+        # Check if we have a valid context before attempting the query
+        $context = Get-AzContext
+        if (-not $context) {
+            Write-Warning "No Azure context found. Please run Connect-AzAccount first."
+            return $null
+        }
+
         $result = Invoke-AzOperationalInsightsQuery -WorkspaceId $LogAnalyticsWorkspaceId -Query $Query
         if ($result -and $result.Results) {
             Write-Host "      ✓ Found $($result.Results.Count) records"
@@ -102,6 +106,9 @@ function Invoke-MetricsQuery {
     }
     catch {
         Write-Warning "Error executing metrics query '$Name': $($_.Exception.Message)"
+        if ($_.Exception.Message -like "*Authentication failed*" -or $_.Exception.Message -like "*credentials have not been set up*") {
+            Write-Host "      💡 Try running: Connect-AzAccount -AuthScope 'https://api.loganalytics.io/'" -ForegroundColor Yellow
+        }
         return $null
     }
 }

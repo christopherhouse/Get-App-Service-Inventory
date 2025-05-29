@@ -24,31 +24,7 @@ Import-Module ImportExcel           -EA Stop
 $connect = @{ ErrorAction = 'Stop' }
 if ($AccountId) { $connect.AccountId = $AccountId }
 if ($TenantId ) { $connect.TenantId  = $TenantId  }
-
-# Check if we need to authenticate
-$needsAuth = $false
-$currentContext = Get-AzContext -ErrorAction SilentlyContinue
-
-if (-not $currentContext) {
-    $needsAuth = $true
-    Write-Host "🔑 No Azure context found, authenticating..."
-} elseif ($TenantId -and $currentContext.Tenant.Id -ne $TenantId) {
-    $needsAuth = $true
-    Write-Host "🔑 Different tenant required, re-authenticating..."
-} elseif ($AccountId -and $currentContext.Account.Id -ne $AccountId) {
-    $needsAuth = $true
-    Write-Host "🔑 Different account required, re-authenticating..."
-}
-
-if ($needsAuth) {
-    try {
-        Connect-AzAccount @connect | Out-Null
-        Write-Host "✅ Authentication successful"
-    } catch {
-        Write-Error "❌ Authentication failed: $($_.Exception.Message)"
-        exit 1
-    }
-}
+if (-not (Get-AzContext)) { Connect-AzAccount @connect | Out-Null }
 
 #── Helper: run ARG with paging, return one DataTable ────────────────────
 function Invoke-ArgQuery {

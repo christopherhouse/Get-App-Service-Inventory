@@ -24,7 +24,31 @@ Import-Module ImportExcel           -EA Stop
 $connect = @{ ErrorAction = 'Stop' }
 if ($AccountId) { $connect.AccountId = $AccountId }
 if ($TenantId ) { $connect.TenantId  = $TenantId  }
-if (-not (Get-AzContext)) { Connect-AzAccount @connect | Out-Null }
+
+# Check if we need to authenticate
+$needsAuth = $false
+$currentContext = Get-AzContext -ErrorAction SilentlyContinue
+
+if (-not $currentContext) {
+    $needsAuth = $true
+    Write-Host "🔑 No Azure context found, authenticating..."
+} elseif ($TenantId -and $currentContext.Tenant.Id -ne $TenantId) {
+    $needsAuth = $true
+    Write-Host "🔑 Different tenant required, re-authenticating..."
+} elseif ($AccountId -and $currentContext.Account.Id -ne $AccountId) {
+    $needsAuth = $true
+    Write-Host "🔑 Different account required, re-authenticating..."
+}
+
+if ($needsAuth) {
+    try {
+        Connect-AzAccount @connect | Out-Null
+        Write-Host "✅ Authentication successful"
+    } catch {
+        Write-Error "❌ Authentication failed: $($_.Exception.Message)"
+        exit 1
+    }
+}
 
 #── Helper: run ARG with paging, return one DataTable ────────────────────
 function Invoke-ArgQuery {
@@ -88,7 +112,6 @@ function Invoke-MetricsQuery {
     }
 
     try {
-        # First, try the query with current authentication
         $result = Invoke-AzOperationalInsightsQuery -WorkspaceId $LogAnalyticsWorkspaceId -Query $Query
         if ($result -and $result.Results) {
             Write-Host "      ✓ Found $($result.Results.Count) records"
@@ -99,40 +122,9 @@ function Invoke-MetricsQuery {
         }
     }
     catch {
-        # If we get an authentication error, try to re-authenticate with Log Analytics scope
-        if ($_.Exception.Message -like "*Authentication failed*" -or 
-            $_.Exception.Message -like "*credentials have not been set up*" -or
-            $_.Exception.Message -like "*OperationalInsightsEndpointResourceId*") {
-            
-            Write-Host "      🔑 Re-authenticating for Log Analytics access..."
-            try {
-                $laConnect = @{ 
-                    ErrorAction = 'Stop'
-                    AuthScope = 'OperationalInsightsEndpointResourceId'
-                }
-                if ($AccountId) { $laConnect.AccountId = $AccountId }
-                if ($TenantId) { $laConnect.TenantId = $TenantId }
-                
-                Connect-AzAccount @laConnect | Out-Null
-                
-                # Retry the query
-                $result = Invoke-AzOperationalInsightsQuery -WorkspaceId $LogAnalyticsWorkspaceId -Query $Query
-                if ($result -and $result.Results) {
-                    Write-Host "      ✓ Found $($result.Results.Count) records"
-                    return $result.Results
-                } else {
-                    Write-Host "      ℹ️  No data returned"
-                    return $null
-                }
-            }
-            catch {
-                Write-Warning "Error after re-authentication: $($_.Exception.Message)"
-                return $null
-            }
-        } else {
-            Write-Warning "Error executing metrics query '$Name': $($_.Exception.Message)"
-            return $null
-        }
+        Write-Warning "Error executing metrics query '$Name': $($_.Exception.Message)"
+        Write-Host "      💡 Tip: Ensure you have Log Analytics Reader permissions on the workspace"
+        return $null
     }
 }
 

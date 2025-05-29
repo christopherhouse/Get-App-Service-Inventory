@@ -24,6 +24,9 @@ Import-Module ImportExcel           -EA Stop
 $connect = @{ ErrorAction = 'Stop' }
 if ($AccountId) { $connect.AccountId = $AccountId }
 if ($TenantId ) { $connect.TenantId  = $TenantId  }
+if ($LogAnalyticsWorkspaceId) { 
+    $connect.AuthScope = 'OperationalInsightsEndpointResourceId'
+}
 if (-not (Get-AzContext)) { Connect-AzAccount @connect | Out-Null }
 
 #── Helper: run ARG with paging, return one DataTable ────────────────────

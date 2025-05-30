@@ -24,6 +24,14 @@ The script handles large Azure environments efficiently by implementing paginati
   - 🔵 `Az.OperationalInsights`
   - 📊 `ImportExcel`
 
+  **Installation commands:**
+  ```powershell
+  Install-Module -Name Az.Accounts -Force
+  Install-Module -Name Az.ResourceGraph -Force  
+  Install-Module -Name Az.OperationalInsights -Force
+  Install-Module -Name ImportExcel -Force
+  ```
+
 - **Azure permissions:**
   - 👁️ Reader access on target subscriptions
   - 📊 Log Analytics Reader access (if collecting metrics data)

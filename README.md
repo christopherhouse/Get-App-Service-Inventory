@@ -6,7 +6,7 @@ A PowerShell script that generates comprehensive Azure App Service inventory rep
 
 This script provides detailed visibility into your Azure App Service environment by collecting:
 
-- 🌐 **App Service inventory** - Apps with OS type, location, and associated service plans
+- 🌐 **App Service inventory** - Apps with OS type, location, application kind, and associated service plans
 - 🏗️ **App Service Plans** - SKU details, worker counts, zone redundancy settings  
 - 📈 **Autoscale configuration** - Min/max capacity and rule counts for service plans
 - ⚙️ **Runtime stacks** - Framework versions and Linux container configurations
@@ -72,7 +72,7 @@ The script handles large Azure environments efficiently by implementing paginati
 
 The script generates an Excel workbook containing multiple worksheets:
 
-- 📱 **Apps** - App Service applications with basic configuration
+- 📱 **Apps** - App Service applications with basic configuration and application kind
 - 🏗️ **Plans** - App Service Plans with SKU and capacity details  
 - 📈 **Autoscale** - Autoscaling rules and capacity settings
 - ⚙️ **Stacks** - Runtime frameworks and versions

@@ -110,7 +110,7 @@ Resources
 | where type =~ "microsoft.web/sites"
 | extend PlanId = tostring(properties.serverFarmId)
 | extend OS = iff(tobool(properties.reserved), "Linux", "Windows")
-| project subscriptionId, resourceGroup, name, OS, location, PlanId
+| project subscriptionId, resourceGroup, name, Kind = kind, OS, location, PlanId
 '@
 
 #── 2  Plans ─────────────────────────────────────────────────────────────
